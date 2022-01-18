@@ -1,3 +1,4 @@
+from cProfile import label
 from typing import Container, ValuesView
 import dash
 from dash.development.base_component import Component
@@ -18,6 +19,10 @@ from yfinance import ticker
 from keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 import numpy as np
+import matplotlib.pyplot as plt
+from model import prediction
+from dash.exceptions import PreventUpdate
+#from matplotlib.pyplot import plt
 
 #get stock data
 start='2012-1-1'
@@ -76,7 +81,8 @@ app.layout=html.Div(
                 children=[
                     dcc.Graph(id='stock_graph'),
                     dcc.Graph(id='indicator_graph'),
-                    dcc.Graph(id='prediction_graph')
+                    dcc.Graph(id='prediction_graph'),
+                    
                 ]
                 ),
             
@@ -141,42 +147,17 @@ def get_more(start_date,end_date,input_param):
     #fig.update_traces(opacity=0.7,mode='markers')
     return fig
 
+# callback for forecast
 @app.callback(
-    Output("prediction_graph",'figure'),
-    Input("days",'days'),
-    State('Forcast_button','n_clicks')
-)
-def get_predictions(days,input):
-    df=data.DataReader(stock_name,'yahoo',start,end)
-    ma100=df.Close.rolling(100).mean()
-    ma200=df.Close.rolling(200).mean()
-    #spliting data into Training and Testing
-    data_training=pd.DataFrame(df['Close'][0:int(len(df)*0.70)])
-    data_testing=pd.DataFrame(df['Close'][int(len(df)*0.70):int(len(df))])
-    scaler=MinMaxScaler(feature_range=(0,1))
-    data_training_array=scaler.fit_transform(data_training)
-    #loading the model
-    model=load_model('keras_model.h5')
-    #testing data
-    past_100_days=data_training.tail(100)
-    final_df=past_100_days.append(data_testing,ignore_index=True)
-    input_data=scaler.fit_transform(final_df)
-    x_test=[]
-    y_test=[]
-
-    for i in range(100,input_data.shape[0]):
-        x_test.append(input_data[i-100:i])
-        y_test.append(input_data[i,0])
-        
-    x_test,y_test=np.array(x_test),np.array(y_test)
-    y_predicted=model.predict(x_test)
-    scaler=scaler.scale_
-    scale_factor=1/scaler[0]
-    y_predicted=y_predicted*scale_factor
-    y_test=y_test*scale_factor
-    fig=px.line(df,x='Date',y=y_predicted,title='Predictions ')
+    Output("prediction_graph", "figure"),
+    Input("days", "value"),
+    State("Forcast_button", "n_clicks"))
+def forecast(n_days, n):
+    print(n,n_days,stock_name)
+    if stock_name == None:
+        raise PreventUpdate
+    fig = prediction(stock_name, int(n_days) + 1)
     return fig
-
 
 if __name__ == '__main__':
     app.run_server(debug=True)

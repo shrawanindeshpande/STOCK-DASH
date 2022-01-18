@@ -1,99 +1,108 @@
-#import dependencies
-import quandl
-import pandas as pd
-import pandas_datareader as data
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.linear_model import LinearRegression
-from sklearn.svm import SVR
-from sklearn.model_selection import train_test_split
-from matplotlib.pyplot import plot, sca
-from keras.layers import Dense,Dropout,LSTM
-from keras.models import Sequential
-#get stock data
-start='2012-1-1'
-end='2022-1-3'
-df=data.DataReader('AAPL','yahoo',start,end)
-df=df.reset_index()
-#print(df)
-df=df.drop(['Date','Adj Close'],axis=1)
-ma100=df.Close.rolling(100).mean()
-ma200=df.Close.rolling(200).mean()
-# plot.figure(figsize=(12,6))
-# plot.plot(df.Close)
-# plot.plot(ma100,'r')
-#print(ma61)
+def prediction(stock, n_days):
+    import dash
+    import dash_core_components as dcc
+    import dash_html_components as html
+    from datetime import datetime as dt
+    import yfinance as yf
+    from dash.dependencies import Input, Output, State
+    from dash.exceptions import PreventUpdate
+    import pandas as pd
+    import plotly.graph_objs as go
+    import plotly.express as px
+    # model
+    from model import prediction
+    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import GridSearchCV
+    import numpy as np
+    from sklearn.svm import SVR
+    from datetime import date, timedelta
+    # load the data
 
-#spliting data into Training and Testing
-data_training=pd.DataFrame(df['Close'][0:int(len(df)*0.70)])
-data_testing=pd.DataFrame(df['Close'][int(len(df)*0.70):int(len(df))])
-# print(data_training.shape)
-# print(data_testing.shape)
-scaler=MinMaxScaler(feature_range=(0,1))
-data_training_array=scaler.fit_transform(data_training)
-#print(data_training_array)
+    df = yf.download(stock, period='60d')
+    df.reset_index(inplace=True)
+    df['Day'] = df.index
 
-x_train=[]
-y_train=[]
-for i in range(100,data_training_array.shape[0]):
-    x_train.append(data_training_array[i-100:i])
-    y_train.append(data_training_array[i,0])
-#print(x_train)
-x_train,y_train=np.array(x_train),np.array(y_train)
+    days = list()
+    for i in range(len(df.Day)):
+        days.append([i])
 
-#ml model
+    # Splitting the dataset
 
-model=Sequential()
-model.add(LSTM(units=50,activation='relu',return_sequences=True,input_shape=(x_train.shape[1],1)))
-model.add(Dropout(0.2))
+    X = days
+    Y = df[['Close']]
 
-model.add(LSTM(units=60,activation='relu',return_sequences=True))
-model.add(Dropout(0.3))
+    x_train, x_test, y_train, y_test = train_test_split(X,
+                                                        Y,
+                                                        test_size=0.1,
+                                                        shuffle=False)
 
-model.add(LSTM(units=80,activation='relu',return_sequences=True))
-model.add(Dropout(0.4))
+    gsc = GridSearchCV(
+        estimator=SVR(kernel='rbf'),
+        param_grid={
+            'C': [0.001, 0.01, 0.1, 1, 100, 1000],
+            'epsilon': [
+                0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10,
+                50, 100, 150, 1000
+            ],
+            'gamma': [0.0001, 0.001, 0.005, 0.1, 1, 3, 5, 8, 40, 100, 1000]
+        },
+        cv=5,
+        scoring='neg_mean_absolute_error',
+        verbose=0,
+        n_jobs=-1)
 
+    y_train = y_train.values.ravel()
+    y_train
+    grid_result = gsc.fit(x_train, y_train)
+    best_params = grid_result.best_params_
+    best_svr = SVR(kernel='rbf',
+                   C=best_params["C"],
+                   epsilon=best_params["epsilon"],
+                   gamma=best_params["gamma"],
+                   max_iter=-1)
 
-model.add(LSTM(units=120,activation='relu',return_sequences=True))
-model.add(Dropout(0.5))
+    # Support Vector Regression Models
 
-model.add(Dense(units=1))
+    # RBF model
+    #rbf_svr = SVR(kernel='rbf', C=1000.0, gamma=4.0)
+    rbf_svr = best_svr
 
-#print(model.summary())
-model.compile(optimizer='adam',loss='mean_squared_error')
-model.fit(x_train,y_train,epochs=50)
-model.save('keras_model.h5')
+    rbf_svr.fit(x_train, y_train)
 
-#print(data_testing.head())
+    output_days = list()
+    for i in range(1, n_days):
+        output_days.append([i + x_test[-1][0]])
 
-past_100_days=data_training.tail(100)
-final_df=past_100_days.append(data_testing,ignore_index=True)
+    dates = []
+    current = date.today()
+    for i in range(n_days):
+        current += timedelta(days=1)
+        dates.append(current)
 
+    # plot Results
+    # fig = go.Figure()
+    # fig.add_trace(
+    #     go.Scatter(x=np.array(x_test).flatten(),
+    #                y=y_test.values.flatten(),
+    #                mode='markers',
+    #                name='data'))
+    # fig.add_trace(
+    #     go.Scatter(x=np.array(x_test).flatten(),
+    #                y=rbf_svr.predict(x_test),
+    #                mode='lines+markers',
+    #                name='test'))
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=dates,  # np.array(ten_days).flatten(), 
+            y=rbf_svr.predict(output_days),
+            mode='lines+markers',
+            name='data'))
+    fig.update_layout(
+        title="Predicted Close Price of next " + str(n_days - 1) + " days",
+        xaxis_title="Date",
+        yaxis_title="Closed Price",
+        # legend_title="Legend Title",
+    )
 
-input_data=scaler.fit_transform(final_df)
-print(input_data.shape)
-
-x_test=[]
-y_test=[]
-
-for i in range(100,input_data.shape[0]):
-    x_test.append(input_data[i-100:i])
-    y_test.append(input_data[i,0])
-    
-x_test,y_test=np.array(x_test),np.array(y_test)
-print(x_test.shape)
-print(y_test.shape)
-
-#making prediction
-
-y_predicted=model.predict(x_test)
-#print(y_predicted)
-#print(y_test)
-scaler.scale_
-# print(scaler.scale_)
-scale_factor=1/0.00682769
-y_predicted=y_predicted*scale_factor
-y_test=y_test*scale_factor
-# print(scale_factor)
-print(y_predicted)
-# print(y_test)
+    return fig
